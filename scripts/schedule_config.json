@@ -1,0 +1,47 @@
+{
+ "vk": {
+  "2": {
+   "active": 30,
+   "rare": 60,
+   "dormant": 180,
+   "archived": 365
+  },
+  "3": {
+   "active": 7,
+   "rare": 21,
+   "dormant": 42,
+   "archived": 360
+  },
+  "4": {
+   "archived": 240
+  }
+ },
+ "facebook": {
+  "2": {
+   "active": 60,
+   "rare": 90,
+   "dormant": 180,
+   "archived": 365
+  },
+  "3": {
+   "active": 10,
+   "rare": 30,
+   "dormant": 60,
+   "archived": 180
+  }
+ },
+ "instagram": {
+  "2": {
+   "active": 60,
+   "rare": 90,
+   "dormant": 180,
+   "archived": 365
+  },
+  "3": {
+   "active": 10,
+   "rare": 30,
+   "dormant": 60,
+   "archived": 180
+  }
+ }
+}

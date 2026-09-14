@@ -1,0 +1,25 @@
+# База — персональные данные живых людей. Никогда не коммитить.
+*.db
+*.db-journal
+*.db-wal
+*.bak_before_*
+
+# Выгрузки из браузера — тоже персональные данные.
+vk_daily_*.json
+vk_sweep_*.json
+fb_friends_*.json
+fb_activity_*.json
+ig_activity_*.json
+items*.json
+
+# Сгенерированные страницы-прогонщики: несут ФИО и id людей из вашей базы.
+tools/vk_daily.html
+tools/fb_batch_*.html
+tools/ig_batch_*.html
+
+# Готовые дайджесты — самое чувствительное, что есть в контуре.
+digest/
+
+__pycache__/
+*.pyc
+.env

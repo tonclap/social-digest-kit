@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Facebook — сбор ссылок на друзей</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.6 -apple-system, "Segoe UI", Roboto, sans-serif;
+         max-width: 780px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; background: #fff; }
+  @media (prefers-color-scheme: dark) { body { color: #e8e8e8; background: #16181c; }
+    pre, .note { background: #22252b !important; border-color: #3a3f47 !important; } }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #6b7280; margin: 0 0 22px; }
+  ol { padding-left: 22px; } li { margin: 10px 0; }
+  pre { background: #f6f7f9; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px;
+        font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; overflow: auto; max-height: 300px; }
+  button { padding: 10px 20px; font-size: 15px; font-weight: 600; background: #2563eb;
+           color: #fff; border: 0; border-radius: 8px; cursor: pointer; }
+  .note { background: #fffbe6; border: 1px solid #f5e6a8; border-radius: 8px; padding: 12px 16px;
+          font-size: 14px; margin: 22px 0; }
+  code { font: 13px ui-monospace, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+
+<h1>Facebook — сбор ссылок на друзей</h1>
+<p class="sub">У 1424 из 1464 человек в переписи нет ссылки на профиль. Этот скрипт снимает имя и ссылку
+сразу для всех со страницы списка друзей — один проход вместо полутора тысяч заходов на профили.</p>
+
+<ol>
+  <li>Открой <b>facebook.com</b> → свой профиль → вкладка <b>Друзья</b> (адрес вида
+      <code>facebook.com/&lt;твой профиль&gt;/friends</code>).</li>
+  <li>Нажми <b>F12</b>, вкладка <b>Console</b>. Если Chrome ругается на вставку — напечатай
+      в консоли <code>allow pasting</code> и нажми Enter.</li>
+  <li>Нажми кнопку ниже, вставь скопированное в консоль, Enter.</li>
+  <li>Страница начнёт сама прокручиваться и собирать ссылки — это несколько минут, не мешай ей.
+      Когда закончит, браузер сохранит файл <code>fb_friends.json</code>.</li>
+</ol>
+
+<button id="copy">Скопировать скрипт</button>
+
+<div class="note">
+  Скрипт только читает страницу и прокручивает её. Ничего не публикует, никуда не отправляет,
+  файл сохраняется тебе в загрузки. Прокрутка идёт человеческим темпом — Facebook такое поведение
+  не отличает от обычного просмотра списка друзей.
+</div>
+
+<pre id="src"></pre>
+
+<script>
+const SNIPPET = String.raw`
+(async () => {
+  const found = new Map();
+  const clean = h => {
+    try {
+      const u = new URL(h, location.origin);
+      if (!/(^|\.)facebook\.com$/.test(u.hostname)) return null;
+      if (u.pathname === '/profile.php') {
+        const id = u.searchParams.get('id');
+        return id ? 'https://www.facebook.com/profile.php?id=' + id : null;
+      }
+      const seg = u.pathname.split('/').filter(Boolean);
+      if (seg.length !== 1) return null;
+      const bad = ['friends','photos','videos','groups','watch','marketplace','events',
+                   'pages','settings','bookmarks','notifications','messages','stories',
+                   'reels','gaming','help','policies','privacy','login','home.php'];
+      if (bad.includes(seg[0]) || seg[0].includes('.php')) return null;
+      return 'https://www.facebook.com/' + seg[0];
+    } catch (e) { return null; }
+  };
+  const grab = () => {
+    document.querySelectorAll('a[href*="facebook.com/"], a[href^="/"]').forEach(a => {
+      const url = clean(a.getAttribute('href'));
+      if (!url) return;
+      const name = (a.innerText || '').trim().split('\n')[0];
+      if (!name || name.length > 60) return;
+      if (!found.has(url)) found.set(url, name);
+    });
+  };
+
+  let same = 0, last = 0, rounds = 0;
+  console.log('%cСбор начат — не трогай страницу', 'color:#2563eb;font-weight:bold');
+  while (same < 8 && rounds < 1500) {
+    grab();
+    window.scrollTo(0, document.body.scrollHeight);
+    await new Promise(r => setTimeout(r, 1100 + Math.random() * 500));
+    rounds++;
+    if (found.size === last) same++; else { same = 0; last = found.size; }
+    if (rounds % 5 === 0) console.log('собрано ' + found.size + ' профилей…');
+  }
+  grab();
+
+  const people = [...found].map(([url, name]) => ({ name, facebook_url: url }));
+  console.log('%cГотово: ' + people.length + ' профилей', 'color:#15803d;font-weight:bold');
+  const blob = new Blob([JSON.stringify({ collected_at: new Date().toISOString(),
+                                          source: location.href, people }, null, 1)],
+                        { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'fb_friends.json';
+  a.click();
+})();
+`.trim();
+
+document.getElementById("src").textContent = SNIPPET;
+document.getElementById("copy").onclick = async () => {
+  await navigator.clipboard.writeText(SNIPPET);
+  const b = document.getElementById("copy");
+  b.textContent = "Скопировано ✓";
+  setTimeout(() => b.textContent = "Скопировать скрипт", 2500);
+};
+</script>
+</body>
+</html>

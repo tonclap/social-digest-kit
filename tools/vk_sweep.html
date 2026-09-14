@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>VK sweep — прочёсывание активности друзей</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.55 -apple-system, "Segoe UI", Roboto, sans-serif;
+         max-width: 760px; margin: 40px auto; padding: 0 20px;
+         color: #1a1a1a; background: #fff; }
+  @media (prefers-color-scheme: dark) { body { color: #e8e8e8; background: #16181c; }
+    input, .box { background: #22252b !important; color: #e8e8e8; border-color: #3a3f47 !important; } }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #6b7280; margin: 0 0 24px; }
+  label { display: block; font-weight: 600; margin: 18px 0 6px; }
+  input[type=text] { width: 100%; padding: 10px 12px; font: 13px ui-monospace, Menlo, Consolas, monospace;
+                     border: 1px solid #d1d5db; border-radius: 8px; box-sizing: border-box; }
+  button { margin-top: 18px; padding: 11px 22px; font-size: 15px; font-weight: 600;
+           background: #2563eb; color: #fff; border: 0; border-radius: 8px; cursor: pointer; }
+  button:disabled { background: #9ca3af; cursor: default; }
+  .box { margin-top: 24px; padding: 16px; border: 1px solid #e5e7eb; border-radius: 10px;
+         background: #f9fafb; display: none; }
+  .bar { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin: 12px 0; }
+  .bar > i { display: block; height: 100%; width: 0; background: #2563eb; transition: width .2s; }
+  .log { font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap;
+         max-height: 220px; overflow: auto; color: #4b5563; }
+  .err { color: #b91c1c; font-weight: 600; }
+  .ok  { color: #15803d; font-weight: 600; }
+  .hint { font-size: 13px; color: #6b7280; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<h1>VK sweep — прочёсывание активности друзей</h1>
+<p class="sub">Читает список друзей и дату последнего поста у каждого, сохраняет результат JSON-файлом.
+Ничего не публикует и не меняет.</p>
+
+<label for="tok">Токен доступа</label>
+<input type="text" id="tok" placeholder="vk1.a.…" autocomplete="off" spellcheck="false">
+<p class="hint">
+  <a href="https://oauth.vk.com/authorize?client_id=54702780&display=page&redirect_uri=https://oauth.vk.com/blank.html&scope=friends,wall&response_type=token&v=5.199">Получить токен</a>
+  и скопировать из адресной строки после <code>#access_token=</code>, до <code>&amp;</code>. Живёт сутки.<br>
+  Права: <code>friends,wall</code> — читать список друзей и стены; публикация и сообщения не входят.
+  Токен выпускается от имени чужого приложения (<code>client_id</code> в ссылке — публичный id
+  для implicit-flow, не автора этого кода): не устраивает — завести своё standalone-приложение VK
+  и подставить его <code>client_id</code>. Токен никуда не отправляется и не сохраняется,
+  живёт только в памяти этой вкладки — код ниже, прочитайте его перед запуском.
+</p>
+
+<button id="go">Начать прочёсывание</button>
+
+<div class="box" id="box">
+  <div id="stage">Подключаюсь…</div>
+  <div class="bar"><i id="bar"></i></div>
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+const API_VER = "5.199";
+const BATCH = 25;          // максимум вызовов в одном execute
+const PAUSE = 340;         // мс между запросами — лимит 3 запроса/сек
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let log = [];
+
+function say(msg, cls) {
+  log.push(cls ? `<span class="${cls}">${msg}</span>` : msg);
+  $("log").innerHTML = log.slice(-400).join("\n");
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+// JSONP — работает и с file://, не зависит от CORS
+function jsonp(method, params) {
+  return new Promise((resolve, reject) => {
+    const cb = "__vk_cb_" + Math.floor(performance.now() * 1000) + "_" + jsonp.n++;
+    const qs = new URLSearchParams({ ...params, v: API_VER, callback: cb }).toString();
+    const s = document.createElement("script");
+    const done = (fn, arg) => { delete window[cb]; s.remove(); fn(arg); };
+    window[cb] = data => done(resolve, data);
+    s.onerror = () => done(reject, new Error("сеть недоступна: " + method));
+    s.src = "https://api.vk.com/method/" + method + "?" + qs;
+    document.body.appendChild(s);
+  });
+}
+jsonp.n = 0;
+
+async function call(method, params, tries = 3) {
+  for (let t = 1; t <= tries; t++) {
+    try {
+      const r = await jsonp(method, params);
+      if (r.error) {
+        const c = r.error.error_code;
+        if (c === 6 && t < tries) { await sleep(1200 * t); continue; }   // too many requests
+        throw new Error("VK " + c + ": " + r.error.error_msg);
+      }
+      return r.response;
+    } catch (e) {
+      if (t === tries) throw e;
+      await sleep(700 * t);
+    }
+  }
+}
+
+function download(obj, name) {
+  const blob = new Blob([JSON.stringify(obj, null, 1)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+$("go").onclick = async () => {
+  const token = $("tok").value.trim().replace(/^access_token=/, "").split("&")[0];
+  if (!token) { alert("Вставь токен"); return; }
+  $("go").disabled = true;
+  $("box").style.display = "block";
+  log = [];
+
+  const started = new Date().toISOString();
+  try {
+    // --- 1. кто я и полный список друзей ---
+    $("stage").textContent = "Читаю список друзей…";
+    const me = await call("users.get", { access_token: token });
+    say(`аккаунт: ${me[0].first_name} ${me[0].last_name} (id${me[0].id})`, "ok");
+
+    let friends = [], offset = 0;
+    while (true) {
+      const r = await call("friends.get", {
+        access_token: token, user_id: me[0].id, order: "name", count: 1000,
+        offset, fields: "domain,first_name,last_name,deactivated,is_closed"
+      });
+      friends = friends.concat(r.items);
+      say(`друзья: ${friends.length} / ${r.count}`);
+      offset += 1000;
+      if (friends.length >= r.count) break;
+      await sleep(PAUSE);
+    }
+
+    const alive = friends.filter(f => !f.deactivated);
+    say(`всего ${friends.length}, из них удалённых/забаненных ${friends.length - alive.length}`);
+
+    // --- 2. последний пост у каждого, пачками по 25 ---
+    $("stage").textContent = "Читаю стены…";
+    const results = [];
+    const chunks = [];
+    for (let i = 0; i < alive.length; i += BATCH) chunks.push(alive.slice(i, i + BATCH));
+
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const ids = chunks[ci].map(f => f.id);
+      const code =
+        "var ids=" + JSON.stringify(ids) + ";var r=[];var i=0;" +
+        "while(i<ids.length){r.push(API.wall.get({owner_id:ids[i],count:1,filter:\"owner\"}));i=i+1;}return r;";
+      let res = null;
+      try {
+        res = await call("execute", { access_token: token, code });
+      } catch (e) {
+        say("пачка " + (ci + 1) + " не прошла: " + e.message, "err");
+      }
+      chunks[ci].forEach((f, k) => {
+        const w = res && res[k];
+        const item = w && w.items && w.items[0];
+        results.push({
+          id: f.id,
+          url: "https://vk.com/" + (f.domain || ("id" + f.id)),
+          name: (f.first_name + " " + f.last_name).trim(),
+          closed: !!f.is_closed,
+          readable: !!w,                                  // false = закрытая стена или ошибка
+          last_post_date: item ? new Date(item.date * 1000).toISOString().slice(0, 10) : null,
+          last_post_url: item ? "https://vk.com/wall" + item.owner_id + "_" + item.id : null,
+          last_post_text: item ? (item.text || "").slice(0, 400) : null,
+          is_repost: item ? !!(item.copy_history && item.copy_history.length) : null
+        });
+      });
+      const pct = Math.round((ci + 1) / chunks.length * 100);
+      $("bar").style.width = pct + "%";
+      $("stage").textContent = `Читаю стены… ${results.length} / ${alive.length}`;
+      if ((ci + 1) % 4 === 0 || ci === chunks.length - 1) say(`прочитано ${results.length} стен`);
+      await sleep(PAUSE);
+    }
+
+    // удалённые тоже пишем — важно знать, что аккаунта больше нет
+    friends.filter(f => f.deactivated).forEach(f => results.push({
+      id: f.id, url: "https://vk.com/" + (f.domain || ("id" + f.id)),
+      name: (f.first_name + " " + f.last_name).trim(),
+      deactivated: f.deactivated, readable: false,
+      last_post_date: null, last_post_url: null, last_post_text: null, is_repost: null
+    }));
+
+    const withPost = results.filter(r => r.last_post_date).length;
+    const unreadable = results.filter(r => !r.readable).length;
+    const today = new Date().toISOString().slice(0, 10);
+    download({
+      generated_at: started, finished_at: new Date().toISOString(),
+      account_id: me[0].id, friends_total: friends.length,
+      with_post: withPost, unreadable, people: results
+    }, `vk_sweep_${today}.json`);
+
+    $("stage").innerHTML = `<span class="ok">Готово.</span> ${results.length} человек, у ${withPost} нашёлся пост, ${unreadable} стен недоступно.`;
+    say("файл сохранён в загрузки: vk_sweep_" + today + ".json", "ok");
+  } catch (e) {
+    $("stage").innerHTML = `<span class="err">Оборвалось: ${e.message}</span>`;
+    say(String(e), "err");
+  } finally {
+    $("go").disabled = false;
+  }
+};
+</script>
+</body>
+</html>
