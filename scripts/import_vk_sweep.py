@@ -178,21 +178,36 @@ def main():
     print(f"  удалённых/забаненных:  {st['dead']}")
     print(f"  стена закрыта:         {st['unreadable']}")
 
+    # Считаем ПО САМОЙ ВЫГРУЗКЕ, а не запросом к observations: там source='api'
+    # пишет и ежедневный import_daily.py, и все прошлые прогоны этого скрипта, —
+    # заголовок «по свежей выгрузке» стоял над цифрой за всю историю базы.
+    today = date.today()
+    buckets = {"писали за 30 дней": 0, "за 31-90 дней": 0, "за 91-365 дней": 0,
+               "больше года назад": 0, "ни одного поста": 0, "стена недоступна": 0}
+    for p in people:
+        if p.get("deactivated"):
+            continue
+        d = p.get("last_post_date")
+        if not d:
+            buckets["стена недоступна" if not p.get("readable") else "ни одного поста"] += 1
+            continue
+        try:
+            y, m, dd = map(int, d.split("-"))
+            age = (today - date(y, m, dd)).days
+        except Exception:
+            continue
+        if age <= 30:
+            buckets["писали за 30 дней"] += 1
+        elif age <= 90:
+            buckets["за 31-90 дней"] += 1
+        elif age <= 365:
+            buckets["за 91-365 дней"] += 1
+        else:
+            buckets["больше года назад"] += 1
+
     print("\nАктивность VK по свежей выгрузке:")
-    for label, cond in [
-        ("писали за 30 дней",  "julianday('now') - julianday(post_date) <= 30"),
-        ("за 31-90 дней",      "julianday('now') - julianday(post_date) BETWEEN 31 AND 90"),
-        ("за 91-365 дней",     "julianday('now') - julianday(post_date) BETWEEN 91 AND 365"),
-        ("больше года назад",  "julianday('now') - julianday(post_date) > 365"),
-    ]:
-        n = q(f"""SELECT COUNT(DISTINCT a.person_id) FROM observations o
-                  JOIN accounts a ON a.id=o.account_id
-                  WHERE o.source='api' AND o.found_post=1 AND {cond}""")
+    for label, n in buckets.items():
         print(f"  {label:<22} {n}")
-    silent = q("""SELECT COUNT(DISTINCT a.person_id) FROM observations o
-                  JOIN accounts a ON a.id=o.account_id
-                  WHERE o.source='api' AND o.found_post=0""")
-    print(f"  {'ни одного поста':<22} {silent}")
     print(f"\n  всего людей в базе: {q('SELECT COUNT(*) FROM people')}")
     con.close()
 

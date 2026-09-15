@@ -27,9 +27,17 @@
 import json
 import os
 import sqlite3
+import sys
 from datetime import date, datetime
+from pathlib import Path
 
 from flask import Flask, request, redirect, url_for, render_template_string, jsonify
+
+# Пороги давности берём из scripts/due_today.py, а не держим вторую копию:
+# раньше здесь было своё 30/90/365, там своё 30/180/365, и связывал их только
+# комментарий «если меняешь одно, вспомни про второе».
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+from due_today import layer as schedule_layer   # noqa: E402
 
 DB_PATH = os.environ.get(
     "SOCIAL_DB_PATH",
@@ -120,31 +128,24 @@ GROUP BY p.id
 PEOPLE_WHERE = "p.importance IS NULL OR p.circle IS NULL"
 
 
-def days_since(d, today):
-    if not d:
-        return None
-    try:
-        y, m, dd = map(int, d.split("-"))
-        return (today - date(y, m, dd)).days
-    except Exception:
-        return None
+# Человеческие подписи к слоям из scripts/due_today.py: active/rare/dormant/
+# archived — это 30/180/365 дней и «старше года».
+LAYER_BADGE = {"active": "30 дней", "rare": "полгода", "dormant": "год",
+               "archived": "больше года"}
 
 
 def compute_layer(last_post, checks, today):
-    """Бейдж давности для очереди разметки (30/90/365 дней). Не путать с
-    layer() в scripts/due_today.py — та же идея, но другие пороги (30/180) и
-    другая цель (расписание проверок, не бейдж). Не связаны кодом, только
-    по смыслу — если меняешь одно, вспомни про второе."""
-    d = days_since(last_post, today)
-    if d is None:
+    """Бейдж давности для очереди разметки. Пороги — те же, что у расписания
+    проверок (layer() в scripts/due_today.py), отличается только подпись:
+    здесь она про «когда человек последний раз писал», там про то, как часто
+    его канал трогать. Своей копии порогов тут больше нет — из-за неё «3 месяца»
+    в очереди и «rare» в расписании означали разное."""
+    if not last_post:
         return "молчит" if checks else "не проверялся"
-    if d <= 30:
-        return "30 дней"
-    if d <= 90:
-        return "3 месяца"
-    if d <= 365:
-        return "год"
-    return "больше года"
+    try:
+        return LAYER_BADGE[schedule_layer(last_post, today)]
+    except Exception:          # дата в базе не разбирается — не роняем очередь
+        return "молчит" if checks else "не проверялся"
 
 
 def load_people_queue(con):
@@ -162,7 +163,7 @@ def load_people_queue(con):
 
         score = importance * 10
         score += 3 if r["in_contacts"] == "yes" else 0
-        score += {"30 дней": 4, "3 месяца": 3, "год": 1}.get(layer, 0)
+        score += {"30 дней": 4, "полгода": 3, "год": 1}.get(layer, 0)
 
         rows.append(dict(
             id=r["id"], display_name=r["display_name"],
@@ -177,7 +178,7 @@ def load_people_queue(con):
     # то есть на каждой строке очереди пересравнивались все поля всех предыдущих —
     # на двух с половиной тысячах человек это единственное место, которое заметно
     # тормозило страницу.
-    live = [r for r in rows if r["layer"] in ("30 дней", "3 месяца")]
+    live = [r for r in rows if r["layer"] in ("30 дней", "полгода")]
     live_ids = {r["id"] for r in live}
     rest = [r for r in rows if r["id"] not in live_ids]
     # r["in_contacts"] хранит 'yes'/'no'/'maybe'/'' — 'no' truthy как строка,

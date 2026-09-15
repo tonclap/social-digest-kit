@@ -28,7 +28,9 @@ for i, a in enumerate(sys.argv):
     if a == "--apply" and i + 1 < len(sys.argv):
         APPLY = {int(x) for x in sys.argv[i + 1].split(",")}
 
-URL_RE = re.compile(r'(?:https?://)?t(?:elegram)?\.me/([a-zA-Z0-9_]{3,})', re.I)
+# (?<![\w.-]) — граница слева: без неё «bot.me/x» и «client.me/x» внутри любого
+# другого домена читались как телеграм-ссылка (совпадало хвостовое «t.me/x»).
+URL_RE = re.compile(r'(?<![\w.-])(?:https?://)?(?:www\.)?t(?:elegram)?\.me/([a-zA-Z0-9_]{3,})', re.I)
 
 con = sqlite3.connect(DB)
 cur = con.cursor()
