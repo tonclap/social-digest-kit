@@ -44,9 +44,27 @@ DB_PATH = os.environ.get(
     "social.db",
 )
 
-CIRCLES = ["семья", "друзья", "коллеги", "обучались вместе", "троичане", "активисты", "ученики", "знакомые", "Подписки"]
+# Круги — словарь владельца, а не свойство инструмента: у каждого он свой
+# (город, школа, сообщество, в котором он варится). В коде лежит нейтральный
+# дефолт; свой набор задаётся SOCIAL_CIRCLES через запятую, а к нему всегда
+# добавляется то, чем люди в базе УЖЕ размечены — иначе после смены словаря
+# старые метки пропали бы из кнопок и их нельзя было бы ни увидеть, ни снять.
+DEFAULT_CIRCLES = ["семья", "друзья", "коллеги", "обучались вместе", "соседи", "знакомые"]
+CIRCLES = [c.strip() for c in os.environ["SOCIAL_CIRCLES"].split(",") if c.strip()] \
+    if os.environ.get("SOCIAL_CIRCLES") else list(DEFAULT_CIRCLES)
 CONTACT_OPTIONS = [("yes", "да"), ("no", "нет"), ("maybe", "может")]
 IMPORTANCE_VALUES = [5, 4, 3, 2, 1, 0]
+
+
+def circles(con):
+    """Кнопки круга: словарь из настроек плюс всё, что уже встречается в базе."""
+    known = list(CIRCLES)
+    for (c,) in con.execute(
+            "SELECT DISTINCT circle FROM people WHERE circle IS NOT NULL AND circle <> ''"):
+        if c not in known:
+            known.append(c)
+    return known
+
 
 app = Flask(__name__)
 
@@ -267,6 +285,7 @@ def people_queue():
     ensure_schema(con)
     limit = int(request.args.get("limit", 50))
     queue = load_people_queue(con)
+    circle_options = circles(con)
     con.close()
     shown = queue[:limit]
     body = render_template_string("""
@@ -354,7 +373,8 @@ def people_queue():
       });
     }
     </script>
-    """, shown=shown, total=len(queue), limit=limit, circles=CIRCLES, importance_values=IMPORTANCE_VALUES)
+    """, shown=shown, total=len(queue), limit=limit, circles=circle_options,
+       importance_values=IMPORTANCE_VALUES)
     return render_template_string(BASE, title="Разметка людей", body=body)
 
 
@@ -473,6 +493,7 @@ def labeled_people():
         GROUP BY p.id
         ORDER BY p.importance DESC, p.display_name COLLATE NOCASE
     """, params).fetchall()
+    circle_options = circles(con)
     con.close()
     body = render_template_string("""
     <p class="counts">
@@ -558,7 +579,7 @@ def labeled_people():
     }
     </script>
     """, rows=rows, imp_filter=imp_filter, circle_filter=circle_filter,
-       circles=CIRCLES, importance_values=IMPORTANCE_VALUES)
+       circles=circle_options, importance_values=IMPORTANCE_VALUES)
     return render_template_string(BASE, title="Полностью размечены", body=body)
 
 
@@ -635,9 +656,10 @@ def people_bio_update(pid):
 
 @app.route("/contexts")
 def contexts_list():
-    """Общие проекты/сообщества, вскрывшиеся при сборе сводок (не пары
-    «дружат» — общие контексты: Гринкемп, «Будущее сегодня» и т.п.), решение
-    хранить так — 04.08.2026. Каждый контекст = сколько угодно людей с ролью."""
+    """Общие проекты и сообщества, вскрывшиеся при сборе сводок: не пары
+    «дружат», а общий контекст — один лагерь, один кружок, одна конференция.
+    Решение хранить так — 04.08.2026. Каждый контекст = сколько угодно людей
+    с ролью."""
     con = get_db()
     ensure_schema(con)
     ctxs = con.execute("SELECT id, name, description FROM contexts ORDER BY name COLLATE NOCASE").fetchall()
@@ -652,15 +674,16 @@ def contexts_list():
         "SELECT id, display_name FROM people ORDER BY display_name COLLATE NOCASE"
     ).fetchall()
     con.close()
-    # 2369+ человек — обычный <select> раздувает страницу до полусотни КБ и
-    # непригоден для поиска глазами; вместо этого один общий JS-массив (грузится
-    # один раз) + текстовый фильтр на клиенте перед каждой формой добавления.
+    # На нескольких тысячах человек обычный <select> раздувает страницу до
+    # полусотни КБ и непригоден для поиска глазами; вместо этого один общий
+    # JS-массив (грузится один раз) + текстовый фильтр на клиенте перед каждой
+    # формой добавления.
     people_json = json.dumps([{"id": p["id"], "name": p["display_name"]} for p in all_people], ensure_ascii=False)
     body = render_template_string("""
     <p class="counts">{{ ctxs|length }} контекстов.</p>
 
     <form method="post" action="{{ url_for('context_create') }}" style="margin-bottom:1rem">
-      <input type="text" name="name" placeholder="Название контекста (напр. Гринкемп)" required>
+      <input type="text" name="name" placeholder="Название контекста (напр. летний лагерь)" required>
       <input type="text" name="description" placeholder="Описание" style="width:40%">
       <button type="submit">Создать</button>
     </form>

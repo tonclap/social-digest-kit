@@ -330,6 +330,27 @@ class LabelerLayer(unittest.TestCase):
         self.assertEqual(main.compute_layer("2026-03-19", 1, today), "полгода")   # 180 дней
         self.assertEqual(main.compute_layer("2026-03-18", 1, today), "год")       # 181
 
+    def test_circles_keep_labels_already_in_the_base(self):
+        """Словарь кругов — личный: в коде нейтральный дефолт, свой задаётся
+        SOCIAL_CIRCLES. Метки, которыми люди в базе уже размечены, обязаны
+        оставаться кнопками, иначе после смены словаря их не видно и не снять."""
+        import main
+        con = sqlite3.connect(":memory:")
+        con.executescript((ROOT / "schema.sql").read_text(encoding="utf-8"))
+        con.execute("INSERT INTO people(display_name, circle, created_at, updated_at) "
+                    "VALUES ('кто-то', 'свой давний круг', date('now'), date('now'))")
+        got = main.circles(con)
+        con.close()
+        self.assertEqual(got[:len(main.CIRCLES)], main.CIRCLES)
+        self.assertIn("свой давний круг", got)
+
+    def test_default_circles_carry_no_personal_taxonomy(self):
+        """Отрицательный контроль: дефолт в коде — общие слова, без городов,
+        сообществ и прочего, что опознаёт конкретного владельца."""
+        import main
+        self.assertEqual(main.DEFAULT_CIRCLES,
+                         ["семья", "друзья", "коллеги", "обучались вместе", "соседи", "знакомые"])
+
     def test_no_post_cases_are_preserved(self):
         """Отрицательный контроль: «молчит» и «не проверялся» — по-прежнему
         разные ответы, их слой расписания не различает."""

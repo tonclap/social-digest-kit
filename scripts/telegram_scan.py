@@ -12,7 +12,7 @@ observations.summary) и печатает кандидатов на запись
 
 Запуск:
     python3 telegram_scan.py social.db                     # только показать кандидатов
-    python3 telegram_scan.py social.db --apply 110,66,455   # записать для этих person_id
+    python3 telegram_scan.py social.db --apply 12,34,56     # записать для этих person_id
                                                               # (берёт первую найденную
                                                               # ссылку для каждого, не
                                                               # трогает уже заполненный
