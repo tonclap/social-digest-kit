@@ -57,10 +57,13 @@ for p in data["people"]:
                                            # считаем проверкой, профиль остаётся в очереди
     ts = p.get("last_post_ts")
     post_date = (datetime.fromtimestamp(ts, timezone.utc).date().isoformat() if ts else None)
+    # post_url — NULL, а не адрес профиля: см. тот же комментарий в
+    # import_fb_activity.py. Профильная ссылка в поле «ссылка на пост» превращала
+    # любую находку в «тот же пост, что и в прошлый раз» для обеих проверок повторов.
     cur.execute("""INSERT INTO observations(account_id, checked_at, found_post, post_date,
                                             post_url, summary, source)
                    VALUES (?,?,?,?,?,?, 'ig_page')""",
-                (aid, TODAY, 1 if ts else 0, post_date, p["url"], None))
+                (aid, TODAY, 1 if ts else 0, post_date, None, None))
     ins += 1
     dated += 1 if ts else 0
 

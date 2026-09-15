@@ -11,6 +11,10 @@
    потом идёт в record_digest.py) и печатает те, что не покрыты НИ ОДНОЙ
    строкой. Именно так был найден реальный пропуск: содержательный пост
    человека с важностью 4 не попал ни в текст дайджеста, ни в «Не вошло».
+   Сверка идёт по паре (человек, сеть): до 15.09.2026 сверялся только
+   person_id, и у человека, найденного в двух сетях сразу, пересказ из одной
+   сети закрывал собой пропуск в другой. Строка items.json без поля networks
+   по-прежнему покрывает любую находку своего человека.
 
 2) ПОВТОРЫ (добавлено 20.08.2026). Среди находок, которые пересказаны как
    СВЕЖИЙ контент (`category` `po_lyudyam` или `tema` — НЕ `ne_voshlo` и НЕ
@@ -39,19 +43,19 @@
 """
 import json, sqlite3, sys
 from datetime import date
+from _cli import positionals, require_db   # см. _cli.py
 
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
+args = positionals(sys.argv[1:], ("--date",))
 if len(args) < 2:
     print(__doc__)
     sys.exit(2)
-DB, ITEMS = args[0], args[1]
+DB, ITEMS = require_db(args[0]), args[1]
 DAY = date.today().isoformat()
 for i, a in enumerate(sys.argv):
     if a == "--date" and i + 1 < len(sys.argv):
         DAY = sys.argv[i + 1]
 
 items = json.load(open(ITEMS, encoding="utf-8"))
-covered = {it.get("person_id") for it in items if it.get("person_id") is not None}
 # для проверки повторов нужно знать категорию и сети конкретно по person_id
 by_person = {}
 for it in items:
@@ -59,6 +63,25 @@ for it in items:
     if pid is None:
         continue
     by_person.setdefault(pid, []).append(it)
+
+# Сокращения, которыми в items.json пишут сеть, — чтобы «fb»/«ig» не считались
+# непокрытыми только из-за формы записи.
+NET_ALIASES = {"vk": ("vk",), "facebook": ("facebook", "fb"), "instagram": ("instagram", "ig")}
+
+
+def covers(item, net):
+    """Покрывает ли строка items.json находку именно в этой сети. Строка без
+    поля networks (например «тема дня», не привязанная к одной сети) покрывает
+    любую находку своего человека — иначе гейт шумел бы на каждой такой строке."""
+    field = (item.get("networks") or "").lower()
+    if not field.strip():
+        return True
+    return any(a in field for a in NET_ALIASES.get(net, (net,)))
+
+
+def is_covered(pid, net):
+    return any(covers(it, net) for it in by_person.get(pid, []))
+
 
 con = sqlite3.connect(DB)
 cur = con.cursor()
@@ -73,13 +96,18 @@ rows = cur.execute("""
     ORDER BY p.importance DESC, p.display_name
 """, (DAY,)).fetchall()
 
-missing = [r for r in rows if r[0] not in covered]
+# Покрытие считается по ПАРЕ (человек, сеть), а не по одному person_id.
+# Пока сверялся только человек, находка во второй его сети пряталась за первой:
+# пересказал VK-пост — и забытая в тот же день находка в Instagram проходила гейт
+# молча. Это ровно тот «тихий пропуск», ради которого гейт и заводился.
+missing = [r for r in rows if not is_covered(r[0], r[4])]
 
 print(f"находок с found_post=1 за {DAY}: {len(rows)}, из них не покрыто items.json: {len(missing)}")
 for pid, name, imp, circle, net, post_date, summary in missing:
-    s = (summary or "(без текста)")
-    s = s if len(s) <= 160 else s[:157] + "..."
-    print(f"  [{imp}] {name} ({circle}, {net}, пост {post_date or '?'}): {s}")
+    txt = (summary or "(без текста)")
+    txt = txt if len(txt) <= 160 else txt[:157] + "..."
+    also = " (человек в дайджесте есть, но не этой сетью)" if pid in by_person else ""
+    print(f"  [{imp}] {name} ({circle}, {net}, пост {post_date or '?'}): {txt}{also}")
 
 # --- 2) повторы, пересказанные как новые (не ne_voshlo) ---
 today_full = cur.execute("""
@@ -124,7 +152,8 @@ for oid, acc_id, post_date, post_url, summary, pid, name, imp, circle, net in to
             break
 
 print(f"повторов среди пересказанного (не «не вошло»): {len(miscategorized)}")
-for imp, name, circle, net, where, cat, summary in sorted(miscategorized, key=lambda r: (-r[0], r[1])):
+for imp, name, circle, net, where, cat, summary in sorted(miscategorized,
+                                                          key=lambda r: (-(r[0] or 0), r[1])):
     print(f"  [{imp}] {name} ({circle}, {net}): {where} — категория «{cat}», "
           f"пост не изменился с прошлой проверки. Перенести в «Не вошло»: "
           f"«{(summary or '')[:80]}» → «тот же пост, что и на прошлой проверке».")
