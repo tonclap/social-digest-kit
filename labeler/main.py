@@ -173,12 +173,18 @@ def load_people_queue(con):
             summary=(r["summary"] or "")[:200], score=score,
         ))
 
+    # Тиры разводятся по id, а не по `r not in live`: там сравнение шло словарями,
+    # то есть на каждой строке очереди пересравнивались все поля всех предыдущих —
+    # на двух с половиной тысячах человек это единственное место, которое заметно
+    # тормозило страницу.
     live = [r for r in rows if r["layer"] in ("30 дней", "3 месяца")]
-    rest = [r for r in rows if r not in live]
+    live_ids = {r["id"] for r in live}
+    rest = [r for r in rows if r["id"] not in live_ids]
     # r["in_contacts"] хранит 'yes'/'no'/'maybe'/'' — 'no' truthy как строка,
     # поэтому сравнивать явно с 'yes', а не проверять истинность самой строки.
     signal = [r for r in rest if r["in_contacts"] == "yes" or (r["importance"] or 0) >= 2]
-    other = [r for r in rest if r not in signal]
+    signal_ids = {r["id"] for r in signal}
+    other = [r for r in rest if r["id"] not in signal_ids]
     for lst in (live, signal, other):
         lst.sort(key=lambda r: (-r["score"], r["last_post"] == "", r["display_name"]))
 
@@ -846,4 +852,10 @@ if __name__ == "__main__":
     # каталогах — правка любого чужого файла рестартовала сервис и рвала запросы
     # прямо посреди живой сессии разметки (так потеряно ~130 из ~180 меток).
     # Правки main.py теперь требуют ручного перезапуска — это осознанный компромисс.
-    app.run(debug=True, port=5057, use_reloader=False)
+    # debug=False: со включённым debug любая необработанная ошибка (например
+    # /people?limit=abc) отдаёт интерактивную консоль werkzeug — выполнение
+    # произвольного кода в процессе, у которого открыта на запись база с
+    # персональными данными полутора тысяч живых людей. Трассировки при этом
+    # никуда не деваются, они по-прежнему печатаются в терминал, где запущен
+    # сервер. Порт слушается только на 127.0.0.1 (умолчание Flask) — не менять.
+    app.run(debug=False, port=5057, use_reloader=False)
