@@ -5,17 +5,25 @@
 *.bak_before_*
 
 # Выгрузки из браузера — тоже персональные данные.
-vk_daily_*.json
-vk_sweep_*.json
-fb_friends_*.json
-fb_activity_*.json
-ig_activity_*.json
+# Шаблоны намеренно без даты в середине и без каталога: браузер сохраняет
+# fb_friends.json и items.json ровно так, без суффикса, а скрипты по умолчанию
+# пишут рядом с собой, а не в tools/. Прежние шаблоны (vk_daily_*.json,
+# tools/vk_daily.html) мимо этих имён промахивались — файл с ФИО и ссылками
+# полусотни людей оставался видимым для git add -A.
+vk_daily*.json
+vk_sweep*.json
+fb_friends*.json
+fb_activity*.json
+ig_activity*.json
+ig_batch*.json
 items*.json
 
 # Сгенерированные страницы-прогонщики: несут ФИО и id людей из вашей базы.
-tools/vk_daily.html
-tools/fb_batch_*.html
-tools/ig_batch_*.html
+# (tools/vk_sweep.html и tools/fb_friends_harvest.html — наоборот, часть
+# поставки: в них никаких данных нет, они сами по себе пустые.)
+vk_daily*.html
+fb_batch*.html
+ig_batch*.html
 
 # Готовые дайджесты — самое чувствительное, что есть в контуре.
 digest/
