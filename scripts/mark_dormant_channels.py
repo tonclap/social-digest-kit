@@ -40,9 +40,10 @@ from datetime import date
 
 sys.path.insert(0, ".")
 import due_today as D
+from _cli import positionals, require_db   # см. _cli.py
 
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
-DB = args[0] if args else "social.db"
+args = positionals(sys.argv[1:], ("--min-importance",))
+DB = require_db(args[0] if args else "social.db")
 APPLY = "--apply" in sys.argv
 MIN_IMPORTANCE = 2
 for i, a in enumerate(sys.argv):

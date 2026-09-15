@@ -19,10 +19,11 @@
 """
 import json, sqlite3, sys
 from datetime import date
+from _cli import positionals, require_db   # см. _cli.py
 
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
+args = positionals(sys.argv[1:], ("--date",))
 SRC = args[0]
-DB = args[1] if len(args) > 1 else "social.db"
+DB = require_db(args[1] if len(args) > 1 else "social.db")
 DAY = date.today().isoformat()
 for i, a in enumerate(sys.argv):
     if a == "--date" and i + 1 < len(sys.argv):

@@ -37,9 +37,10 @@ post_url помечены как менее точное совпадение (�
 """
 import sqlite3, sys
 from datetime import date
+from _cli import positionals, require_db   # см. _cli.py
 
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
-DB = args[0] if args else "social.db"
+args = positionals(sys.argv[1:], ("--date",))
+DB = require_db(args[0] if args else "social.db")
 DAY = date.today().isoformat()
 for i, a in enumerate(sys.argv):
     if a == "--date" and i + 1 < len(sys.argv):

@@ -61,9 +61,12 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import due_today as D
+from _cli import positionals, require_db   # см. _cli.py
 
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
+args = positionals(sys.argv[1:], ("--min-importance", "--min-sample", "--max-count-per-day"))
 DB = args[0] if args else "social.db"
+if __name__ == "__main__":   # модуль импортируют (recalibrate_schedule.py) — там нужен только код, не база
+    DB = require_db(DB)
 MIN_IMPORTANCE = 2
 MIN_SAMPLE = 15
 MAX_COUNT_PER_DAY = 200
