@@ -29,8 +29,9 @@ cur = con.cursor()
 
 # 1. in_contacts
 cur.execute("UPDATE people SET in_contacts='yes' WHERE in_contacts IN ('1','True','true')")
-cur.execute("UPDATE people SET in_contacts='no'  WHERE in_contacts IN ('0','False','false')")
 fixed = cur.rowcount
+cur.execute("UPDATE people SET in_contacts='no'  WHERE in_contacts IN ('0','False','false')")
+fixed += cur.rowcount   # rowcount живёт до следующего execute: считать надо оба
 if CONTACTS:
     keys = set()
     for line in open(CONTACTS, encoding="utf-8", errors="replace"):

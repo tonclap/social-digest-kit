@@ -39,9 +39,10 @@ import json, os, sqlite3, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import due_today as D
 import calibration_report as C
+from _cli import positionals, require_db   # см. _cli.py
 
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
-DB = args[0] if args else "social.db"
+args = positionals(sys.argv[1:], ("--min-sample", "--max-count-per-day", "--min-importance"))
+DB = require_db(args[0] if args else "social.db")
 APPLY = "--apply" in sys.argv
 MIN_IMPORTANCE = 2
 MIN_SAMPLE = 15
@@ -110,9 +111,10 @@ def enforce_monotonic(base_by_network, proposals):
             for lyr in LAYER_ORDER:
                 if lyr not in by_layer:
                     continue
-                val = proposals.get((net, imp, lyr), by_layer[lyr])
+                current = by_layer[lyr]
+                val = proposals.get((net, imp, lyr), current)
                 if val < prev:
-                    adjustments.append((net, imp, lyr, val, prev))
+                    adjustments.append((net, imp, lyr, prev, val, current))
                     val = prev
                 final[(net, imp, lyr)] = val
                 prev = val
@@ -158,13 +160,22 @@ def main():
     if adjustments:
         print(f"\n{len(adjustments)} значени(е/й) дополнительно поджато(ы) ради монотонности "
               f"(слой не может проверяться реже, чем более свежий слой той же важности/сети):")
-        for net, imp, lyr, val, floor in adjustments:
-            print(f"  {net} imp={imp} {lyr}: подняли до {val}д (не может быть меньше {floor}д)")
+        for net, imp, lyr, val, was, _current in adjustments:
+            print(f"  {net} imp={imp} {lyr}: {was}д → {val}д "
+                  f"(не может быть меньше, чем более свежий слой)")
 
     if APPLY:
         path = D.SCHEDULE_CONFIG_PATH
         existing = load_existing_config(path)
-        for (net, imp, lyr), new_days in proposals.items():
+        # Пишем значения из final, а не из proposals: поджатие ради монотонности
+        # раньше только печаталось, а в файл уезжало исходное предложение — и
+        # конфиг оставался ровно в том состоянии, которое докстринг обещает
+        # исключить («rare проверяем реже, чем dormant»). Записываем все ячейки,
+        # где final отличается от действующего значения: и сами предложения, и
+        # соседние слои, которые пришлось подтянуть за ними.
+        for (net, imp, lyr), new_days in sorted(final.items()):
+            if new_days == D.DAYS_BY_NETWORK.get(net, {}).get(imp, {}).get(lyr):
+                continue
             existing.setdefault(net, {})
             existing[net].setdefault(str(imp), {})
             existing[net][str(imp)][lyr] = new_days

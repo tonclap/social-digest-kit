@@ -9,9 +9,10 @@
 """
 import json, sqlite3, sys, time
 from datetime import date, timedelta
+from _cli import positionals, require_db   # см. _cli.py
 
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
-DB = args[0] if args else "social.db"
+args = positionals(sys.argv[1:], ("--days",))
+DB = require_db(args[0] if args else "social.db")
 OUT = args[1] if len(args) > 1 else "vk_daily.html"
 DAYS = 7
 for i, a in enumerate(sys.argv):
@@ -135,11 +136,17 @@ def main():
 
     con = sqlite3.connect(DB)
     cur = con.cursor()
+    # ключ — account_id, а НЕ person_id: у человека законно бывает два VK-аккаунта
+    # (старый заброшенный профиль и новый, оба заведены переписью). Пока ключом был
+    # person_id, в словаре оставался только последний из них — и обе due-записи
+    # человека уезжали в страницу с id и url ОДНОГО и того же аккаунта: второй не
+    # собирался никогда, его last_checked не двигался, и он висел в due на каждом
+    # прогоне, а первый получал по два одинаковых наблюдения за день.
     accounts = {}
-    for pid, aid, url, nid in cur.execute("""SELECT person_id, id, url, network_id FROM accounts
-                                             WHERE network='vk' AND url IS NOT NULL
-                                               AND COALESCE(is_dead,0)=0"""):
-        accounts[pid] = (aid, url, nid)
+    for aid, url, nid in cur.execute("""SELECT id, url, network_id FROM accounts
+                                        WHERE network='vk' AND url IS NOT NULL
+                                          AND COALESCE(is_dead,0)=0"""):
+        accounts[aid] = (url, nid)
 
     # due_today.iter_due() — общая логика "кому пора" (важность×активность,
     # per-network last_checked, важность 1 исключена, важность 2 раз в месяц).
@@ -147,14 +154,14 @@ def main():
     # могла разъехаться с due_today.py; теперь дергаем сразу его функцию.
     targets = []
     for r in D.iter_due(con, network="vk"):
-        pid = r["person_id"]
-        if pid not in accounts:
+        aid = r["account_id"]
+        if aid not in accounts:
             continue
-        aid, url, nid = accounts[pid]
+        url, nid = accounts[aid]
         owner = nid or url.rstrip("/").split("/")[-1].replace("id", "")
         if not str(owner).isdigit():
             continue                      # без числового id execute не сработает
-        targets.append(dict(account_id=aid, person_id=pid, name=r["name"],
+        targets.append(dict(account_id=aid, person_id=r["person_id"], name=r["name"],
                             url=url, owner_id=int(owner)))
     con.close()
 

@@ -52,7 +52,7 @@ def main():
         if k:
             idx.setdefault(k, (aid, pid))
 
-    st = dict(obs=0, merged=0, new=0, matched=0, dead=0, unreadable=0)
+    st = dict(obs=0, merged=0, new=0, matched=0, dead=0, unreadable=0, bare_repost=0)
     merge_log, new_log = [], []
 
     def merge(keep_pid, drop_pid):
@@ -60,12 +60,34 @@ def main():
             return
         cur.execute("UPDATE accounts SET person_id=? WHERE person_id=?", (keep_pid, drop_pid))
         cur.execute("UPDATE digest_items SET person_id=? WHERE person_id=?", (keep_pid, drop_pid))
-        # заметку и in_contacts не теряем
-        row = cur.execute("SELECT note, in_contacts FROM people WHERE id=?", (drop_pid,)).fetchone()
+        # Ручную разметку владельца при слиянии не теряем. Раньше переносились
+        # только note и in_contacts — importance/circle/биосправка/пометки о смерти
+        # оставались на удаляемой записи и исчезали вместе с ней. Важность ставится
+        # руками и восстановить её неоткуда, а слияние идёт автоматически, по факту
+        # совпадения ссылок: молча обнулить размеченного человека нельзя.
+        # COALESCE берёт значение от drop только там, где у keep пусто.
+        row = cur.execute("""SELECT note, in_contacts, importance, circle, bio_summary,
+                                    bio_updated_at, telegram_url, COALESCE(is_deceased,0)
+                             FROM people WHERE id=?""", (drop_pid,)).fetchone()
         if row:
             cur.execute("""UPDATE people SET note=COALESCE(note, ?),
-                                             in_contacts=COALESCE(in_contacts, ?)
-                           WHERE id=?""", (row[0], row[1], keep_pid))
+                                             in_contacts=COALESCE(in_contacts, ?),
+                                             importance=COALESCE(importance, ?),
+                                             circle=COALESCE(circle, ?),
+                                             bio_summary=COALESCE(bio_summary, ?),
+                                             bio_updated_at=COALESCE(bio_updated_at, ?),
+                                             telegram_url=COALESCE(telegram_url, ?),
+                                             is_deceased=MAX(COALESCE(is_deceased,0), ?),
+                                             updated_at=?
+                           WHERE id=?""", (*row, TODAY, keep_pid))
+        # person_context не имеет ON DELETE и внешние ключи в SQLite по умолчанию
+        # выключены — без переноса остались бы строки, ссылающиеся на удалённого
+        # человека. UPDATE OR IGNORE, потому что UNIQUE(person_id, context_id):
+        # если оба состояли в одном контексте, лишняя строка не переносится, а
+        # удаляется следом.
+        cur.execute("""UPDATE OR IGNORE person_context SET person_id=? WHERE person_id=?""",
+                    (keep_pid, drop_pid))
+        cur.execute("DELETE FROM person_context WHERE person_id=?", (drop_pid,))
         cur.execute("DELETE FROM people WHERE id=?", (drop_pid,))
         st["merged"] += 1
 
@@ -114,18 +136,31 @@ def main():
             st["unreadable"] += 1
 
         found = 1 if p.get("last_post_date") else 0
-        summary = (p.get("last_post_text") or "").strip().replace("\n", " ")[:300] or None
-        if found and p.get("is_repost") and summary:
-            summary = "[репост] " + summary
+        text = (p.get("last_post_text") or "").strip().replace("\n", " ")
+        # Голый репост (copy_history есть, своих слов нет) — то же правило, что и в
+        # import_daily.is_bare_repost(). До этого разовый импорт переписи писал
+        # authored_by_owner=NULL всем подряд, а COALESCE(...,1)=1 в due_today.py
+        # считает NULL собственной активностью: канал человека, который только
+        # репостит, попадал в быстрый слой проверки и сидел там. Пустой last_post_text
+        # заодно съедал и маркер "[репост]" — наблюдение было неотличимо от
+        # собственного поста без текста.
+        bare_repost = bool(found and p.get("is_repost") and not text)
+        summary = text[:300] or None
+        if found and p.get("is_repost"):
+            summary = ("[репост] " + text)[:300] if text else "[репост]"
+        owner_flag = 0 if bare_repost else None
         exists = cur.execute("""SELECT 1 FROM observations
                                 WHERE account_id=? AND checked_at=? AND source='api'""",
                              (aid, TODAY)).fetchone()
         if not exists:
             cur.execute("""INSERT INTO observations(account_id, checked_at, found_post,
-                                                    post_date, post_url, summary, source)
-                           VALUES (?,?,?,?,?,?, 'api')""",
-                        (aid, TODAY, found, p.get("last_post_date"), p.get("last_post_url"), summary))
+                                                    post_date, post_url, summary, source,
+                                                    authored_by_owner)
+                           VALUES (?,?,?,?,?,?, 'api', ?)""",
+                        (aid, TODAY, found, p.get("last_post_date"), p.get("last_post_url"),
+                         summary, owner_flag))
             st["obs"] += 1
+            st["bare_repost"] += bare_repost
 
     con.commit()
 
@@ -137,7 +172,9 @@ def main():
     print(f"  слито дублей:          {st['merged']}")
     for m in merge_log[:12]:
         print(f"      {m}")
-    print(f"  наблюдений записано:   {st['obs']}")
+    print(f"  наблюдений записано:   {st['obs']}"
+          + (f"  (из них голых репостов {st['bare_repost']} — authored_by_owner=0)"
+             if st["bare_repost"] else ""))
     print(f"  удалённых/забаненных:  {st['dead']}")
     print(f"  стена закрыта:         {st['unreadable']}")
 

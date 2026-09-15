@@ -5,7 +5,8 @@
 уже известный vk/fb аккаунт.
 
 Использование: merge_person.py <db> <placeholder_person_id> <real_person_id> [--apply]
-Переносит все accounts и observations placeholder -> real, затем удаляет
+Переносит все accounts (а вместе с ними и observations, они цепляются к
+account_id), digest_items и person_context placeholder -> real, затем удаляет
 placeholder person (если после переноса у него не осталось своих записей).
 """
 import sqlite3, sys
@@ -28,6 +29,14 @@ print(f"  moving accounts: {accs}")
 
 if APPLY:
     cur.execute("UPDATE accounts SET person_id=? WHERE person_id=?", (real_id, placeholder_id))
+    # digest_items и person_context ссылаются на people.id напрямую; внешние ключи
+    # в SQLite по умолчанию выключены, поэтому DELETE ниже не падает, а молча
+    # оставляет строки, ссылающиеся в никуда (пункт прошлого дайджеста перестаёт
+    # находиться по человеку). Переносим их на реального человека до удаления.
+    cur.execute("UPDATE digest_items SET person_id=? WHERE person_id=?", (real_id, placeholder_id))
+    cur.execute("UPDATE OR IGNORE person_context SET person_id=? WHERE person_id=?",
+                (real_id, placeholder_id))   # UNIQUE(person_id, context_id) — оба могли быть в одном контексте
+    cur.execute("DELETE FROM person_context WHERE person_id=?", (placeholder_id,))
     left = cur.execute("SELECT COUNT(*) FROM accounts WHERE person_id=?", (placeholder_id,)).fetchone()[0]
     if left == 0:
         cur.execute("DELETE FROM people WHERE id=?", (placeholder_id,))
