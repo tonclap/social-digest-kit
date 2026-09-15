@@ -40,6 +40,14 @@ observations, из-за чего формальные VK-репосты без �
 account_id (не по тексту дайджеста): если выбранный сегодня пост имеет тот же
 url, что и последнее записанное наблюдение с found_post=1 по этому каналу —
 это не новость, а тот же самый пост, что уже видели в прошлый раз.
+15.09.2026: сравнение берёт последнее наблюдение СТРОГО ДО СЕГОДНЯ — как и
+было написано в комментарии к запросу, но не в самом запросе. Из-за этого
+второй прогон `--apply` за тот же день (перезалить файл, доложить вторую
+пачку) сверял находку с собственной записью, сделанной минуту назад: весь
+material уходил в ноль, а дайджест выглядел как «сегодня никто ничего не
+написал». Заодно наблюдение за день пишется один раз, как в соседних
+импортёрах, — повторный прогон больше не задваивает записи.
+
 ОГРАНИЧЕНИЕ: в observations сохраняется только ОДИН (выбранный) пост в день —
 если в окне несколько постов и лишь часть из них уже фигурировала в прошлых
 дайджестах по памяти (не как отдельная запись в observations), это сравнение
@@ -52,11 +60,12 @@ url, что и последнее записанное наблюдение с f
 """
 import json, sqlite3, sys
 from datetime import date
+from _cli import positionals, require_db   # см. _cli.py
 
 APPLY = "--apply" in sys.argv
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
+args = positionals(sys.argv[1:], ())
 SRC = args[0]
-DB = args[1] if len(args) > 1 else "social.db"
+DB = require_db(args[1] if len(args) > 1 else "social.db")
 TODAY = date.today().isoformat()
 
 data = json.load(open(SRC, encoding="utf-8"))
@@ -70,12 +79,13 @@ last_known_url = {}
 for account_id, url in cur.execute("""
     SELECT o.account_id, o.post_url
     FROM observations o
-    WHERE o.found_post = 1 AND o.post_url IS NOT NULL
+    WHERE o.found_post = 1 AND o.post_url IS NOT NULL AND o.checked_at < ?
       AND o.checked_at = (
           SELECT MAX(o2.checked_at) FROM observations o2
           WHERE o2.account_id = o.account_id AND o2.found_post = 1
+            AND o2.checked_at < ?
       )
-"""):
+""", (TODAY, TODAY)):
     last_known_url[account_id] = url
 
 
@@ -101,7 +111,14 @@ def pick_post(posts):
     return max(posts, key=lambda x: x["date"]), False
 
 
-material, obs = [], 0
+# Наблюдения этого же дня в сравнение не берутся (`checked_at < TODAY` выше).
+# Иначе повторный прогон --apply за тот же день сравнивал сегодняшнюю находку
+# с собственной записью, сделанной минуту назад, объявлял её несвежей и печатал
+# пустой material — «сегодня никто ничего не написал» при полной странице постов.
+# Второе следствие того же: запись за день теперь делается один раз (как в
+# import_vk_sweep.py и import_fb_activity.py), иначе в базе оставались два
+# наблюдения за одну проверку и гейт полноты считал находки дважды.
+material, obs, skipped = [], 0, 0
 for p in data["people"]:
     posts = p.get("posts") or []
     chosen, is_own = pick_post(posts)
@@ -109,7 +126,11 @@ for p in data["people"]:
     # "свежее" = либо постов не было, либо выбранный сегодня отличается от
     # того, что уже было записано в прошлый раз по этому каналу.
     is_fresh = chosen is not None and (not prev_url or chosen.get("url") != prev_url)
-    if APPLY:
+    if APPLY and cur.execute("""SELECT 1 FROM observations
+                                WHERE account_id=? AND checked_at=? AND source='api'""",
+                             (p["account_id"], TODAY)).fetchone():
+        skipped += 1
+    elif APPLY:
         if chosen is None:
             summary, post_date, post_url, owner_flag = None, None, None, None
         else:
@@ -146,5 +167,6 @@ print(json.dumps({"date": TODAY,
                   "checked": len(data["people"]),
                   "with_new": len(material),
                   "observations_written": obs,
+                  "observations_skipped_already_today": skipped,
                   "people": material}, ensure_ascii=False, indent=1))
 con.close()
