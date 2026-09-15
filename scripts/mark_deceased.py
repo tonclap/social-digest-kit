@@ -24,13 +24,14 @@
 """
 import sqlite3, sys
 from datetime import date
+from _cli import positionals, require_db   # см. _cli.py
 
 APPLY = "--apply" in sys.argv
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
+args = positionals(sys.argv[1:], ())
 if len(args) < 3:
     print(__doc__)
     sys.exit(1)
-DB, person_id, note_text = args[0], int(args[1]), args[2]
+DB, person_id, note_text = require_db(args[0]), int(args[1]), args[2]
 
 con = sqlite3.connect(DB)
 cur = con.cursor()

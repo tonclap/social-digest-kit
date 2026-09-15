@@ -19,9 +19,10 @@ observations.summary) и печатает кандидатов на запись
                                                               # telegram_url)
 """
 import re, sqlite3, sys
+from _cli import positionals, require_db   # см. _cli.py
 
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
-DB = args[0] if args else "social.db"
+args = positionals(sys.argv[1:], ("--apply",))
+DB = require_db(args[0] if args else "social.db")
 APPLY = None
 for i, a in enumerate(sys.argv):
     if a == "--apply" and i + 1 < len(sys.argv):

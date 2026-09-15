@@ -89,9 +89,12 @@ DAYS — это дефолт; `schedule_config.json` (если лежит ряд
 """
 import hashlib, json, os, sqlite3, sys
 from datetime import date
+from _cli import positionals, require_db   # см. _cli.py
 
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
+args = positionals(sys.argv[1:], ("--network", "--limit"))
 DB = args[0] if args else "social.db"
+if __name__ == "__main__":   # модуль импортируют (export_vk_daily.py / channel_health.py и др.) — там нужен только код, не база
+    DB = require_db(DB)
 AS_JSON = "--json" in sys.argv
 NET = None
 LIMIT = None

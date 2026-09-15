@@ -35,9 +35,10 @@ from datetime import date
 
 sys.path.insert(0, ".")
 import due_today as D
+from _cli import positionals, require_db   # см. _cli.py
 
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
-DB = args[0] if args else "social.db"
+args = positionals(sys.argv[1:], ("--min-importance", "--layer", "--min-streak"))
+DB = require_db(args[0] if args else "social.db")
 MIN_IMPORTANCE = 2
 LAYER_FILTER = None
 MIN_STREAK = None
@@ -93,7 +94,10 @@ def main():
         seen = r["last_post"] or "ни разу"
         note = f"  — {r['note']}" if r["note"] and (LAYER_FILTER or MIN_STREAK is not None) else ""
         streak_s = f" streak={r['empty_streak']}" if r["empty_streak"] else ""
-        print(f"  [{r['importance']}] {r['name']:<28} {r['circle']:<16} "
+        # circle у человека бывает не проставлен (очередь разметки спрашивает
+        # важность и круг по отдельности) — формат-спека на None падает TypeError
+        # и роняет весь список, а не одну строку.
+        print(f"  [{r['importance']}] {r['name']:<28} {(r['circle'] or '—'):<16} "
               f"{r['network']:<10} {r['layer']:<8} посл. пост {seen}{streak_s}{note}")
 
     if not LAYER_FILTER and MIN_STREAK is None:

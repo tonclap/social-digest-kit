@@ -48,9 +48,10 @@ post_url (ссылка на конкретный пост нигде не сох
 """
 import json, sqlite3, sys
 from datetime import date
+from _cli import positionals, require_db   # см. _cli.py
 
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
-ITEMS, DB = args[0], args[1] if len(args) > 1 else "social.db"
+args = positionals(sys.argv[1:], ("--source",))
+ITEMS, DB = args[0], require_db(args[1] if len(args) > 1 else "social.db")
 SOURCE = "browser"
 for i, a in enumerate(sys.argv):
     if a == "--source" and i + 1 < len(sys.argv):
