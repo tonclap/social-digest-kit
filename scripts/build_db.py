@@ -2,8 +2,11 @@
 """
 Фаза 0 — сборка единой базы людей social.db из переписи.
 
-Идемпотентно по URL аккаунта: повторный запуск подхватывает новых людей из
-census-файлов и никого не задваивает.
+Идемпотентно: повторный запуск подхватывает новых людей из census-файлов и
+никого не задваивает. Строки переписи БЕЗ ссылки (IG-никнеймы, FB без url, VK
+с пустой колонкой) сверяются по имени среди уже заведённых безссылочных
+аккаунтов той же сети — раньше так умел только Facebook, а VK и Instagram
+заводили такому человеку новую запись на КАЖДОМ прогоне.
 
 Источники (внутри папки, переданной первым аргументом):
   raw/census/vk_census.csv, facebook_census.csv, instagram_census.csv  — перепись
@@ -135,10 +138,14 @@ def main():
     for aid, pid, net, url in cur.execute(
             "SELECT id, person_id, network, url FROM accounts WHERE url IS NOT NULL"):
         existing[(net, url)] = (aid, pid)
-    existing_fb_by_name = {}   # name_key -> person_id  (FB без ссылок)
-    for pid, nm in cur.execute(
-            "SELECT person_id, name_raw FROM accounts WHERE network='facebook' AND url IS NULL"):
-        existing_fb_by_name.setdefault(name_key(nm), pid)
+    # аккаунты без ссылки сверяются по имени — единственный ключ, который у них
+    # есть. Ключ общий для всех сетей: до 15.09.2026 так умел только Facebook,
+    # из-за чего строка переписи без ссылки в VK/IG заводила нового человека на
+    # каждом прогоне (идемпотентность держалась только на URL).
+    existing_by_name = {}      # (network, name_key) -> person_id
+    for pid, net, nm in cur.execute(
+            "SELECT person_id, network, name_raw FROM accounts WHERE url IS NULL"):
+        existing_by_name.setdefault((net, name_key(nm)), pid)
 
     stats = dict(people_new=0, acc_new=0, acc_skip=0, merged=0, obs=0)
 
@@ -168,12 +175,18 @@ def main():
     # --- 3. VK: базовый слой, у всех есть URL ---
     vk_person_by_url = {}
     for nm, url in vk:
-        if url and (("vk", url) in existing):
+        nk = name_key(nm)
+        if url and ("vk", url) in existing:
             pid = existing[("vk", url)][1]
+        elif not url and ("vk", nk) in existing_by_name:
+            pid = existing_by_name[("vk", nk)]
         else:
             pid = new_person(nm, contacts_flag(nm))
             add_account(pid, "vk", url, nm)
-        vk_person_by_url[url] = pid
+            if not url:
+                existing_by_name.setdefault(("vk", nk), pid)
+        if url:
+            vk_person_by_url[url] = pid
 
     # --- 4. FB: подклеиваем к VK-человеку по парам, иначе новый человек ---
     fb_person_by_namekey = {}
@@ -182,8 +195,8 @@ def main():
         pid = None
         if url and ("facebook", url) in existing:
             pid = existing[("facebook", url)][1]
-        elif nk in existing_fb_by_name:
-            pid = existing_fb_by_name[nk]
+        elif ("facebook", nk) in existing_by_name:
+            pid = existing_by_name[("facebook", nk)]
         else:
             # ищем VK-человека, с которым этот FB сопоставлен
             if nk not in ambiguous_fb:
@@ -196,15 +209,20 @@ def main():
                 pid = new_person(nm, contacts_flag(nm))
             add_account(pid, "facebook", url, nm)
             if url is None:
-                existing_fb_by_name.setdefault(nk, pid)
+                existing_by_name.setdefault(("facebook", nk), pid)
         fb_person_by_namekey.setdefault(nk, pid)
 
     # --- 5. IG: никнеймы, сливать по имени нельзя — всегда отдельный человек ---
     for nm, url in ig:
+        nk = name_key(nm)
         if url and ("instagram", url) in existing:
+            continue
+        if not url and ("instagram", nk) in existing_by_name:
             continue
         pid = new_person(nm, contacts_flag(nm))
         add_account(pid, "instagram", url, nm)
+        if not url:
+            existing_by_name.setdefault(("instagram", nk), pid)
 
     # --- 6. старый _people.yml: заметки и реальные наблюдения от 31.07 ---
     for p in read_people_yml(f"{SRC}/archive/_people.yml"):

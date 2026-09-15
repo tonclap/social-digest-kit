@@ -7,15 +7,23 @@
 и дописываем ссылку. Неоднозначные имена (несколько человек с одинаковым) не трогаем —
 их разберёт человек на этапе разметки.
 
+Свой профиль и односторонние паблики раньше были зашиты в код константами
+(`OWNER = "tommytonclap"`) — у любого, кто соберёт это у себя, собственная
+страница приезжала в базу как друг, а чужой паблик не отсекался. Теперь это
+аргументы: без --owner скрипт прямо говорит, что свой профиль не исключён.
+
 Запуск: python3 import_fb_links.py <fb_friends.json> [social.db] [--apply]
+                                   [--owner <слаг своего профиля>]
+                                   [--page <слаг паблика>] ...
 Без --apply только показывает, что будет сделано.
 """
 import json, re, sqlite3, sys, unicodedata
+from _cli import positionals, require_db   # см. _cli.py
 
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
+args = positionals(sys.argv[1:], ("--owner", "--page"))
 APPLY = "--apply" in sys.argv
 SRC = args[0] if args else "fb_friends.json"
-DB = args[1] if len(args) > 1 else "social.db"
+DB = require_db(args[1] if len(args) > 1 else "social.db")
 
 # служебные ссылки интерфейса, не люди
 JUNK_PATH = {
@@ -25,9 +33,14 @@ JUNK_PATH = {
 }
 JUNK_NAME = {"панель", "редактировать", "все", "друзья", "ещё", "еще", "профиль",
              "посмотреть профиль", "создать", "меню"}
-OWNER = "tommytonclap"          # собственный профиль владельца
-# страницы/паблики, которые владелец читает односторонне — не люди, в базу не идут
-PAGES = {"choosetoteachrussia"}
+# собственный профиль (--owner) и односторонние паблики (--page, можно несколько)
+OWNER = None
+PAGES = set()
+for i, a in enumerate(sys.argv):
+    if a == "--owner" and i + 1 < len(sys.argv):
+        OWNER = sys.argv[i + 1].rstrip("/").split("/")[-1]
+    if a == "--page" and i + 1 < len(sys.argv):
+        PAGES.add(sys.argv[i + 1].rstrip("/").split("/")[-1])
 
 
 def norm(s):
@@ -50,6 +63,9 @@ def is_person(e):
 
 
 def main():
+    if not OWNER:
+        print("ВНИМАНИЕ: --owner не задан — ваш собственный профиль, если он есть "
+              "в выгрузке, попадёт в базу как человек из круга.")
     data = json.load(open(SRC, encoding="utf-8"))
     raw = data["people"]
     people = [e for e in raw if is_person(e)]

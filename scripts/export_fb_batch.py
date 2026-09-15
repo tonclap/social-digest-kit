@@ -218,9 +218,13 @@ def main():
             recheck_rows.append((r["account_id"], r["url"], r["name"]))
 
     rows = list(backlog_rows) + recheck_rows
-    left_backlog = con.execute(BACKLOG_COUNT_SQL).fetchone()[0]
+    in_batch = {r[0] for r in rows}
+    # «осталось» — то, что НЕ уехало в эту порцию: иначе те же аккаунты считались
+    # дважды (и в порции, и в остатке), и число не сходилось ни с чем.
+    left_backlog = con.execute(BACKLOG_COUNT_SQL).fetchone()[0] - len(backlog_ids & in_batch)
     left_recheck = sum(1 for r in D.iter_due(con, network="facebook")
-                        if "profile.php" not in (r["url"] or ""))
+                        if "profile.php" not in (r["url"] or "")
+                        and r["account_id"] not in in_batch)
     con.close()
 
     targets = [{"id": r[0], "url": r[1]} for r in rows]

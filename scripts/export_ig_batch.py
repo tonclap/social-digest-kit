@@ -126,8 +126,14 @@ def main():
             recheck_rows.append((r["account_id"], handle, r["url"], r["name"], 0))
 
     rows = list(backlog_rows) + recheck_rows
+    in_batch = {r[0] for r in rows}
     left_post, left_bio_only = con.execute(COUNT_SQL).fetchone()
-    left_recheck = sum(1 for _ in D.iter_due(con, network="instagram"))
+    # вычитаем то, что уже уехало в эту порцию — иначе аккаунт числился
+    # одновременно и в порции, и в остатке
+    left_post = max(0, (left_post or 0) - sum(1 for r in backlog_rows if r[5] == 0))
+    left_bio_only = max(0, (left_bio_only or 0) - sum(1 for r in backlog_rows if r[4] and r[5] == 1))
+    left_recheck = sum(1 for r in D.iter_due(con, network="instagram")
+                       if r["account_id"] not in in_batch)
     con.close()
     targets = [
         {"id": r[0], "handle": r[1], "url": r[2], "name": r[3], "need_bio": bool(r[4])}
