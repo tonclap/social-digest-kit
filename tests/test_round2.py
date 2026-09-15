@@ -29,13 +29,13 @@ class FacebookAuthorship(Base):
 
     def batch(self, aid):
         return self.write_json("fb.json", {"collected_at": TODAY, "seconds": 1, "people": [
-            {"account_id": aid, "url": "https://facebook.com/anna", "ok": True,
+            {"account_id": aid, "url": "https://facebook.com/test-fb-1", "ok": True,
              "last_post_ts": 1789300000, "error": None}]})
 
     def setUp(self):
         super().setUp()
-        self.pid = self.person("Аня Т", importance=5)
-        self.aid = self.account(self.pid, "facebook", "https://facebook.com/anna")
+        self.pid = self.person("Тест Фейсбучный", importance=5)
+        self.aid = self.account(self.pid, "facebook", "https://facebook.com/test-fb-1")
 
     def test_batch_find_is_not_own_activity(self):
         code, out = run("import_fb_activity.py", self.batch(self.aid), self.db)
@@ -100,8 +100,8 @@ class BuildDbIdempotency(Base):
 
 
 class FbLinksOwner(Base):
-    """`OWNER = "tommytonclap"` был зашит в код: у постороннего собственный
-    профиль приезжал в базу как друг."""
+    """Свой профиль был зашит в код константой: у постороннего, кто соберёт
+    это у себя, собственная страница приезжала в базу как друг."""
 
     def harvest(self):
         return self.write_json("fb_friends.json", {"people": [
@@ -254,11 +254,11 @@ class LegacyRepair(Base):
     def setUp(self):
         super().setUp()
         pid = self.person("С историей")
-        self.aid = self.account(pid, "facebook", "https://facebook.com/anna")
+        self.aid = self.account(pid, "facebook", "https://facebook.com/test-fb-1")
         self.observation(self.aid, "2026-09-01", 1, post_date="2026-08-28",
-                         post_url="https://facebook.com/anna", source="fb_page", owner=None)
+                         post_url="https://facebook.com/test-fb-1", source="fb_page", owner=None)
         self.observation(self.aid, "2026-09-05", 1, post_date="2026-09-04",
-                         post_url="https://facebook.com/anna/posts/123", source="browser")
+                         post_url="https://facebook.com/test-fb-1/posts/123", source="browser")
 
     def urls(self):
         with self.con() as con:
@@ -268,7 +268,7 @@ class LegacyRepair(Base):
     def test_profile_urls_are_cleared_and_real_ones_kept(self):
         code, out = run("fix_legacy_observations.py", self.db, "--apply")
         self.assertEqual(code, 0, out)
-        self.assertEqual(self.urls(), [None, "https://facebook.com/anna/posts/123"])
+        self.assertEqual(self.urls(), [None, "https://facebook.com/test-fb-1/posts/123"])
 
     def test_dry_run_changes_nothing(self):
         """Отрицательный контроль: без --apply скрипт только считает."""
