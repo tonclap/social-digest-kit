@@ -55,7 +55,7 @@ CREATE TABLE people (
     id           INTEGER PRIMARY KEY,
     display_name TEXT NOT NULL,
     importance   INTEGER,                   -- 0-5, ставит владелец; NULL = не размечен
-    circle       TEXT,                      -- свободный текст; реальный словарь — CIRCLES в labeler/main.py
+    circle       TEXT,                      -- свободный текст; кнопки задаёт SOCIAL_CIRCLES (labeler/main.py)
     in_contacts  TEXT,                      -- yes/no/maybe
     note         TEXT,
     created_at   TEXT NOT NULL,
