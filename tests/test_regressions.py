@@ -86,11 +86,11 @@ class RepeatDetection(Base):
     TS_DATE = datetime.fromtimestamp(TS, timezone.utc).date().isoformat()
 
     def fb_batch(self, ts):
-        pid = self.person("Аня Т")
-        aid = self.account(pid, "facebook", "https://facebook.com/anna")
+        pid = self.person("Тест Фейсбучный")
+        aid = self.account(pid, "facebook", "https://facebook.com/test-fb-1")
         return pid, aid, self.write_json("fb.json", {
             "collected_at": TODAY, "seconds": 1,
-            "people": [{"account_id": aid, "url": "https://facebook.com/anna",
+            "people": [{"account_id": aid, "url": "https://facebook.com/test-fb-1",
                         "ok": True, "last_post_ts": ts, "error": None}]})
 
     def test_new_post_is_not_a_repeat(self):
@@ -98,7 +98,7 @@ class RepeatDetection(Base):
         # прошлое наблюдение — как его писал старый импортёр: в post_url лежит
         # адрес профиля, а не поста (именно такие строки и лежат в живой базе)
         self.observation(aid, "2026-09-01", 1, post_date="2026-08-28",
-                         post_url="https://facebook.com/anna", source="fb_page")
+                         post_url="https://facebook.com/test-fb-1", source="fb_page")
         self.assertEqual(run("import_fb_activity.py", src, self.db)[0], 0)
         code, out = run("flag_repeat_posts.py", self.db, "--date", TODAY)
         self.assertEqual(code, 0, out)
@@ -109,7 +109,7 @@ class RepeatDetection(Base):
         проверке, которая просто перестала что-либо находить."""
         pid, aid, src = self.fb_batch(self.TS)
         self.observation(aid, "2026-09-01", 1, post_date=self.TS_DATE,
-                         post_url="https://facebook.com/anna", source="fb_page")
+                         post_url="https://facebook.com/test-fb-1", source="fb_page")
         run("import_fb_activity.py", src, self.db)
         code, out = run("flag_repeat_posts.py", self.db, "--date", TODAY)
         self.assertEqual(code, 1, out)
@@ -212,12 +212,12 @@ class VkSweep(Base):
     def test_merge_keeps_owner_labeling(self):
         """Слияние дублей (домен + числовой id) не должно терять важность и круг:
         они ставятся руками и восстановить их неоткуда."""
-        plain = self.person("Маша (перепись)", importance=None, circle=None)
+        plain = self.person("Тест Дубль (перепись)", importance=None, circle=None)
         self.account(plain, "vk", "https://vk.com/id42")
-        labeled = self.person("Маша Иванова", importance=5, circle="семья")
-        self.account(labeled, "vk", "https://vk.com/masha")
+        labeled = self.person("Тест Дубль (размеченный)", importance=5, circle="семья")
+        self.account(labeled, "vk", "https://vk.com/test_vk_alias")
         src = self.write_json("sweep.json", {"generated_at": TODAY, "people": [
-            {"id": 42, "url": "https://vk.com/masha", "name": "Маша Иванова", "readable": True,
+            {"id": 42, "url": "https://vk.com/test_vk_alias", "name": "Тест Дубль (размеченный)", "readable": True,
              "last_post_date": "2026-09-13", "last_post_url": "https://vk.com/wall42_7",
              "last_post_text": "привет", "is_repost": False}]})
         run("import_vk_sweep.py", src, self.db)
